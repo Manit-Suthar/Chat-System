@@ -1,0 +1,158 @@
+Here are the exact commands you can run in your terminal to compile and test the chat system manually. Open three separate terminal windows to follow along.
+
+### 1. Commands to Compile and Run
+
+**Terminal 1 (Compile & Run the Server)**
+First, we need to compile the source code into executable Java bytecode, and then start the server.
+```bash
+# Navigate to your project folder
+cd /Users/manit/Desktop/chat-system
+
+# Compile all the Java files into the 'out' directory
+javac -d out -sourcepath common/src:server/src:client/src client/src/com/chat/client/ChatClient.java server/src/com/chat/server/ChatServer.java
+
+# Start the Chat Server
+java -cp out com.chat.server.ChatServer
+```
+*(You will see: "Chat Server started on port 5000" and "Waiting for client...")*
+
+**Terminal 2 (Start Client 1 - Alice)**
+```bash
+# Navigate to your project folder
+cd /Users/manit/Desktop/chat-system
+
+# Start the first client
+java -cp out com.chat.client.ChatClient
+```
+*(Type `Alice` as your username and press Enter. You can now type messages here.)*
+
+**Terminal 3 (Start Client 2 - Bob)**
+```bash
+# Navigate to your project folder
+cd /Users/manit/Desktop/chat-system
+
+# Start the second client
+java -cp out com.chat.client.ChatClient
+```
+*(Type `Bob` as your username and press Enter. Try chatting between Terminal 2 and Terminal 3! To exit, type `/quit` in either terminal.)*
+
+---
+
+### 2. What Happens Inside the Computer? (Execution Flow & Processor Walkthrough)
+
+When you run those commands, a lot of fascinating coordination happens between the software, the operating system (OS), and your Mac's processor (CPU). Here is the step-by-step breakdown:
+
+#### Step 1: Compilation (`javac`)
+* **What happens**: The processor executes the Java Compiler (`javac`). It reads your human-readable `.java` text files and translates them into `.class` files.
+* **Under the hood**: The CPU parses the text, checks for syntax rules, and generates **Bytecode**—a special set of instructions that any Java Virtual Machine (JVM) can understand. It writes these bytes to the `out` folder on your hard drive.
+
+#### Step 2: Starting the Server (`java ChatServer`)
+* **What happens**: Your OS launches a new **JVM process**. The JVM acts like a simulated mini-computer running inside your Mac.
+* **Loading**: The JVM's ClassLoader reads `ChatServer.class` from the hard drive into your computer's RAM.
+* **Execution**: The processor locates the `public static void main` method. Because it's Java bytecode, the JVM uses a component called the "Just-In-Time (JIT) Compiler" to instantly translate the bytecode into native Apple Silicon/Intel machine code that your physical CPU can execute directly.
+* **Networking**: The CPU executes the `new ServerSocket(5000)` code. This tells the macOS kernel: *"I want to claim network port 5000. Let me know if anyone tries to connect."* 
+* **Blocking**: When the code hits `serverSocket.accept()`, the CPU doesn't just spin in an endless loop wasting power. Instead, the OS puts the Server thread to **sleep** (blocks it). The CPU is completely freed up to do other tasks until a network signal arrives.
+
+#### Step 3: Starting the Client (`java ChatClient`)
+* **What happens**: Another JVM process is launched in a separate terminal. It loads `ChatClient.class`.
+* **Connecting**: The CPU hits `new Socket("localhost", 5000)`. It asks macOS to connect to port 5000. 
+* **TCP Handshake**: The OS sends a network signal (even though it's on the same machine, it routes through a virtual network interface). It performs a "TCP 3-way handshake" (SYN, SYN-ACK, ACK) at the operating system level to establish a reliable connection pipeline.
+
+#### Step 4: The Server Wakes Up
+* **What happens**: macOS receives the network signal on port 5000. It says, *"Ah! The ChatServer process was waiting for this!"*
+* **Context Switch**: The OS wakes up the Server thread. The CPU resumes executing code right where it left off at `accept()`, returning a shiny new `Socket` object representing the connection to the Client.
+* **Multithreading**: The server creates a `new ClientHandler(clientSocket)` and calls `.start()`. The OS creates a **brand new thread** for this specific client. 
+* **Parallelism**: If you have a multi-core processor, the main Server thread (waiting for new clients) and the ClientHandler thread (listening to Alice) might literally be executing on two completely different CPU cores at the exact same physical millisecond.
+
+#### Step 5: Sending a Message
+* **What happens**: In Terminal 2, you type "Hello Bob!" and press Enter.
+* **Input handling**: When you press Enter, the physical keyboard sends an electrical interrupt to the CPU. The OS handles the interrupt, reads the keystroke, and passes it to the Client JVM, waking up `System.in.readLine()`.
+* **Transmission**: The Client converts the string "Hello Bob!" into raw bytes and writes it to the socket. The OS breaks this data into small TCP packets, adds routing headers, and fires them across the internal network.
+* **Reception**: The Server's `ClientHandler` thread for Alice—which was put to sleep waiting for data—is woken up by the OS. It reads the bytes, converts them back to a String, and loops through the `clients` list.
+* **Broadcasting**: For every other client in the list (like Bob), the Server writes the string to their respective sockets. The OS transports the packets to Bob's JVM, which prints it to Bob's terminal screen.
+
+#### Step 6: Disconnecting (`/quit`)
+* **What happens**: Bob types `/quit`.
+* **Client shutdown**: The Client code sees `/quit`, breaks its loop, and calls `socket.close()`. The OS sends a special TCP "FIN" (finish) packet to the server to gracefully close the pipeline. The Client JVM shuts down, and macOS reclaims its RAM.
+* **Server cleanup**: The Server's `ClientHandler` for Bob tries to read the socket but receives an "End of File" (EOF) signal because the socket was closed. It catches this, removes Bob from the `clients` list, and the ClientHandler thread gracefully terminates.
+
+In summary, your code acts as a director, telling the JVM how to orchestrate threads and memory. The JVM translates this to the OS, which heavily relies on hardware interrupts to put the processor to sleep when waiting for typing or network data, and rapidly wakes it up the microsecond an event occurs!
+
+
+Phase 8: Protocol Upgrade Walkthrough
+The chat system has been successfully upgraded from plain text strings to structured JSON payloads using Google's Gson library!
+
+Summary of Changes
+Dependency Added:
+
+Manually downloaded gson-2.10.1.jar to a new lib directory.
+Updated the Java classpaths to compile and run with this external JAR.
+The Message Model (common/src/com/chat/common/Message.java):
+
+Created a central data model class representing a chat event.
+Fields: type (JOIN, MESSAGE, QUIT, LEAVE), username, and textContent.
+Client Refactor (ChatClient.java):
+
+The user is now prompted for a username before connecting to the server.
+Upon connection, the client sends a {"type":"JOIN", "username":"...", "textContent":""} JSON string to the server.
+Standard chat messages are wrapped in JSON: {"type":"MESSAGE", "username":"...", "textContent":"Hello!"}
+The listening thread now parses incoming JSON and extracts the username and textContent for clean console display.
+Server Refactor (ChatServer.java & ClientHandler.java):
+
+The server reads JSON strings and deserializes them into Message objects.
+Using the Command enum type, it handles connections, standard messages, and disconnections cleanly without string hacking.
+System notifications (like "Alice joined the chat") are now formulated as proper JSON Message objects sent out by the server.
+How to Compile & Run (New Commands)
+Since we introduced an external .jar library, you must tell Java where to find it using the -cp (classpath) flag.
+
+1. Compile Everything
+bash
+cd /Users/manit/Desktop/chat-system
+javac -cp "lib/gson-2.10.1.jar" -d out -sourcepath common/src:server/src:client/src client/src/com/chat/client/ChatClient.java server/src/com/chat/server/ChatServer.java
+2. Run the Server
+bash
+java -cp "out:lib/gson-2.10.1.jar" com.chat.server.ChatServer
+3. Run the Client(s)
+bash
+java -cp "out:lib/gson-2.10.1.jar" com.chat.client.ChatClient
+
+Phase 9: Features Walkthrough
+The chat system has now been upgraded with advanced "Product-Level" features, moving it far beyond a simple broadcast server! In addition, critical security rules were introduced based on your feedback.
+
+What Was Added
+1. Robust Architecture & Security 🛡️
+ConcurrentHashMap: In ChatServer.java, the List<ClientHandler> was replaced with a thread-safe mapping (ConcurrentHashMap<String, ClientHandler>). This enables O(1) lookups for direct messaging and natively handles duplicate usernames.
+Server-Side Spoofing Prevention: A malicious client cannot pretend to be someone else anymore. ClientHandler.java now completely ignores the username field in incoming messages and overwrites it with the authenticated this.username associated with that specific TCP socket before processing.
+Duplicate Username Validation: If a new client tries to JOIN with a username that is already in the map, the server responds with a strict JSON Command.ERROR message and forces a disconnect.
+2. Private Messaging 🤫
+Command: /msg <username> <message>
+Implementation: The ChatClient parses this command and sends a Command.PRIVATE JSON object with a new targetUser property. The ChatServer uses ConcurrentHashMap.get(targetUser) to route the message only to the intended recipient's socket.
+Output: (Private from Bob): Hello!
+3. Online User List 👥
+Command: /users
+Implementation: The ChatClient sends a Command.USERS JSON object. The server dynamically pulls clients.keySet(), formats a string, and sends it back to the requesting client as a system message.
+Output: *** Online users: Alice, Bob ***
+4. Message Timestamps 🕒
+Implementation: A new timestamp string field was added to the Message model. The ClientHandler generates a standardized HH:mm:ss timestamp (e.g., using LocalTime.now()) the moment a message arrives on the server. The client parses this and prepends it to the output.
+Output: [15:14:42] Alice: Hello world
+Code Highlights
+O(1) Direct Routing in ChatServer:
+
+java
+public static boolean sendToUser(Message message, String targetUsername) {
+    ClientHandler targetClient = clients.get(targetUsername);
+    if (targetClient != null) {
+        targetClient.sendMessage(gson.toJson(message));
+        return true;
+    }
+    return false;
+}
+Security Override in ClientHandler:
+
+java
+// Force the username to match the registered handler to prevent identity spoofing
+msg.setUsername(this.username);
+msg.setTimestamp(LocalTime.now().format(timeFormatter));
+if (msg.getType() == Command.MESSAGE) {
+    ChatServer.broadcast(msg, this);
+}
